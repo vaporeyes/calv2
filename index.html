@@ -1,0 +1,467 @@
+<!--
+ABOUTME: Static JavaScript calendar - displays full year on a single printable page.
+ABOUTME: Based on Neatnik's calendar, converted to client-side JS with additional features.
+
+MIT License
+
+Based on Calendar by Neatnik LLC (https://neatnik.net/calendar)
+Original work: Copyright (c) 2025 Neatnik LLC
+Modifications: Copyright (c) 2025 Josh Huckabee
+
+Modifications include:
+- Conversion from PHP to client-side JavaScript
+- Added "sofshavua" parameter for Friday/Saturday weekend highlighting
+- Added "aligned-weekdays" layout option
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calendar</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<meta name="title" content="Calendar">
+<meta name="og:title" content="Calendar">
+<meta name="description" content="A simple printable calendar with the full year on a single page">
+<meta name="og:description" content="A simple printable calendar with the full year on a single page">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+@import url('https://fonts.bunny.net/css?family=inter:300|oswald:300,400');
+@media print {
+  @page {
+    margin: 0;
+    padding: 1em;
+  }
+  .year-nav {
+    display: none;
+  }
+  td {
+    font-size: 8px !important;
+  }
+  .weekend {
+    background: #d8d8d8 !important;
+  }
+  .tooltip {
+    display: none !important;
+  }
+  .event-count {
+    color: #666 !important;
+  }
+  .has-events {
+    background: transparent !important;
+  }
+}
+html {
+  font-family: 'Oswald';
+}
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+table {
+  width: 100%;
+  height: calc(100% - 2.5em);
+  border-collapse: separate;
+  border-spacing: .5em 0;
+}
+td, th {
+  font-weight: normal;
+  text-transform: uppercase;
+  border-bottom: 1px solid #888;
+  padding: .3vmin .3vmin;
+  font-size: .9vmin;
+  font-weight: 300;
+  color: #000;
+}
+th {
+  font-size: 1.1vmin;
+  padding: 0;
+}
+td:empty {
+  border: 0;
+}
+.date {
+  display: inline-block;
+  width: 1.1em;
+}
+.day {
+  display: inline-block;
+  text-align: center;
+  width: 1em;
+  color: #888;
+}
+.weekend {
+  background: #eee;
+  font-weight: 400;
+}
+p {
+  margin: 0 0 .5em 0;
+  text-align: center;
+}
+* {
+  color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+.year-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: .3em;
+}
+.year-nav a {
+  text-decoration: none;
+  color: #aaa;
+  font-size: .7em;
+  transition: color .15s;
+  line-height: 1;
+}
+.year-nav a:hover {
+  color: #333;
+}
+.has-events {
+  cursor: help;
+  position: relative;
+  background: #fef9e7;
+}
+.has-events:focus {
+  outline: 2px solid #3498db;
+  outline-offset: -1px;
+}
+.event-count {
+  display: inline-block;
+  font-size: .6em;
+  color: #c0392b;
+  margin-left: .2em;
+  vertical-align: middle;
+}
+.tooltip {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 10;
+  background: #333;
+  color: #eee;
+  border-radius: .3em;
+  padding: .4em .6em;
+  font-size: .8vmin;
+  font-family: 'Inter', sans-serif;
+  text-transform: none;
+  white-space: nowrap;
+  max-height: 12em;
+  overflow-y: auto;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .15s, visibility .15s;
+  pointer-events: none;
+}
+.tooltip ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tooltip li {
+  padding: .15em 0;
+  border-bottom: 1px solid #555;
+}
+.tooltip li:last-child {
+  border-bottom: none;
+}
+.has-events:hover .tooltip,
+.has-events:focus .tooltip,
+.has-events.active .tooltip {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+</style>
+</head>
+<body>
+<p id="year-heading"><span class="year-nav"><a id="prev-year-link" href="" title="Previous year">&#8249;</a> <span id="year-text"></span> <a id="next-year-link" href="" title="Next year">&#8250;</a></span></p>
+<table>
+<thead>
+<tr id="month-headers"></tr>
+</thead>
+<tbody id="calendar-body">
+</tbody>
+</table>
+
+<script>
+
+// ============================================================
+// Supabase configuration
+// ============================================================
+
+const SUPABASE_URL = '%%SUPABASE_URL%%';
+const SUPABASE_ANON_KEY = '%%SUPABASE_ANON_KEY%%';
+
+// ============================================================
+// Event fetching
+// ============================================================
+
+async function fetchEvents(year) {
+  // Returns { "YYYY-MM-DD": ["title1", "title2"], ... }
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return {};
+
+  if (typeof window.supabase === 'undefined') {
+    console.warn('Supabase client library not loaded (CDN may be unreachable). Rendering without events.');
+    return {};
+  }
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+
+  const { data, error } = await supabase
+    .from('events')
+    .select('event_date, title')
+    .gte('event_date', startDate)
+    .lte('event_date', endDate);
+
+  if (error) {
+    console.error('Failed to fetch events:', error.message);
+    return {};
+  }
+
+  const eventsByDate = {};
+  for (const row of data) {
+    if (!eventsByDate[row.event_date]) {
+      eventsByDate[row.event_date] = [];
+    }
+    eventsByDate[row.event_date].push(row.title);
+  }
+  return eventsByDate;
+}
+
+// ============================================================
+// Date utility functions
+// ============================================================
+
+function getDaysInMonth(year, month) {
+  // month is 1-12
+  return new Date(year, month, 0).getDate();
+}
+
+function getFirstWeekday(year, month) {
+  // Returns 1-7 (Mon-Sun) for first day of month
+  const jsDay = new Date(year, month - 1, 1).getDay();
+  return jsDay === 0 ? 7 : jsDay;
+}
+
+function isWeekend(dayOfWeek, sofshavua) {
+  // dayOfWeek is 1-7 (Mon-Sun)
+  if (sofshavua) {
+    return dayOfWeek === 5 || dayOfWeek === 6; // Fri-Sat
+  }
+  return dayOfWeek === 6 || dayOfWeek === 7; // Sat-Sun
+}
+
+function getWeekdayLetter(year, month, day) {
+  const date = new Date(year, month - 1, day);
+  return new Intl.DateTimeFormat('en', { weekday: 'short' }).format(date)[0];
+}
+
+function getMonthName(month) {
+  const date = new Date(2000, month - 1, 1);
+  return new Intl.DateTimeFormat('en', { month: 'short' }).format(date);
+}
+
+function getDayOfWeek(year, month, day) {
+  // Returns 1-7 (Mon-Sun)
+  const jsDay = new Date(year, month - 1, day).getDay();
+  return jsDay === 0 ? 7 : jsDay;
+}
+
+// ============================================================
+// Calendar data builders
+// ============================================================
+
+function buildDefaultLayoutData(year) {
+  // 31 rows x 12 columns - each row is a day of month (1-31)
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const daysInMonth = getDaysInMonth(year, m);
+    const days = [];
+    for (let d = 1; d <= 31; d++) {
+      if (d <= daysInMonth) {
+        days.push({
+          day: d,
+          weekday: getDayOfWeek(year, m, d),
+          weekdayLetter: getWeekdayLetter(year, m, d)
+        });
+      } else {
+        days.push(null);
+      }
+    }
+    months.push(days);
+  }
+  return months;
+}
+
+function buildAlignedWeekdaysData(year) {
+  // 42 rows x 12 columns - 6 weeks, days aligned by weekday position
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const daysInMonth = getDaysInMonth(year, m);
+    const firstWeekday = getFirstWeekday(year, m);
+    const days = [];
+    let dayNum = 1;
+
+    for (let slot = 1; slot <= 42; slot++) {
+      if (slot < firstWeekday || dayNum > daysInMonth) {
+        days.push(null);
+      } else {
+        days.push({
+          day: dayNum,
+          weekday: getDayOfWeek(year, m, dayNum)
+        });
+        dayNum++;
+      }
+    }
+    months.push(days);
+  }
+  return months;
+}
+
+// ============================================================
+// DOM rendering
+// ============================================================
+
+async function renderCalendar(year, layout, sofshavua) {
+  // Year heading with navigation chevrons
+  document.getElementById('year-text').textContent = year;
+  document.getElementById('prev-year-link').href = '?year=' + (year - 1);
+  document.getElementById('next-year-link').href = '?year=' + (year + 1);
+
+  // Month headers
+  const headerRow = document.getElementById('month-headers');
+  headerRow.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    const th = document.createElement('th');
+    th.textContent = getMonthName(m);
+    headerRow.appendChild(th);
+  }
+
+  // Fetch events from Supabase
+  const events = await fetchEvents(year);
+
+  // Calendar body
+  const tbody = document.getElementById('calendar-body');
+  tbody.innerHTML = '';
+
+  const isAligned = layout === 'aligned-weekdays';
+  const data = isAligned ? buildAlignedWeekdaysData(year) : buildDefaultLayoutData(year);
+  const numRows = isAligned ? 42 : 31;
+
+  for (let row = 0; row < numRows; row++) {
+    const tr = document.createElement('tr');
+
+    for (let m = 0; m < 12; m++) {
+      const td = document.createElement('td');
+      const cell = data[m][row];
+
+      if (cell) {
+        if (isWeekend(cell.weekday, sofshavua)) {
+          td.className = 'weekend';
+        }
+
+        // Build date key for event lookup
+        const month = m + 1;
+        const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')}`;
+        const dayEvents = events[dateKey];
+
+        if (isAligned) {
+          // Aligned layout: just the day number
+          td.textContent = cell.day;
+        } else {
+          // Default layout: day number + weekday letter
+          const dateSpan = document.createElement('span');
+          dateSpan.className = 'date';
+          dateSpan.textContent = cell.day;
+
+          const daySpan = document.createElement('span');
+          daySpan.className = 'day';
+          daySpan.textContent = cell.weekdayLetter;
+
+          td.appendChild(dateSpan);
+          td.appendChild(document.createTextNode(' '));
+          td.appendChild(daySpan);
+        }
+
+        // Add event count indicator and tooltip
+        if (dayEvents && dayEvents.length > 0) {
+          td.classList.add('has-events');
+          td.setAttribute('tabindex', '0');
+
+          const count = document.createElement('span');
+          count.className = 'event-count';
+          count.textContent = dayEvents.length;
+          td.appendChild(count);
+
+          const tooltip = document.createElement('div');
+          tooltip.className = 'tooltip';
+          const ul = document.createElement('ul');
+          for (const title of dayEvents) {
+            const li = document.createElement('li');
+            li.textContent = title;
+            ul.appendChild(li);
+          }
+          tooltip.appendChild(ul);
+          td.appendChild(tooltip);
+        }
+      }
+
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+}
+
+// ============================================================
+// Tooltip touch interaction
+// ============================================================
+
+document.addEventListener('click', function(e) {
+  const cell = e.target.closest('.has-events');
+  // Dismiss all active tooltips first
+  document.querySelectorAll('.has-events.active').forEach(function(el) {
+    if (el !== cell) el.classList.remove('active');
+  });
+  // Toggle the clicked cell's tooltip
+  if (cell) {
+    cell.classList.toggle('active');
+  }
+});
+
+// ============================================================
+// Initialization
+// ============================================================
+
+(async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const year = parseInt(params.get('year')) || new Date().getFullYear();
+  const layout = params.get('layout') || 'default';
+  const sofshavua = params.has('sofshavua');
+
+  await renderCalendar(year, layout, sofshavua);
+})();
+</script>
+</body>
+</html>
