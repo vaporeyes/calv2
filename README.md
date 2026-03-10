@@ -9,6 +9,8 @@ Based on [Calendar by Neatnik](https://neatnik.net/calendar), converted from PHP
 - 12-month year-at-a-glance grid in a single HTML file
 - Two layout modes: default (day + weekday letter) and aligned-weekdays (traditional grid)
 - Event count indicators on dates with events, with styled hover/tap tooltips
+- Light background highlight on days with events
+- Chevron navigation to move between years
 - Print-first design: clean single-page output via `@media print`
 - Configurable via URL parameters (year, layout, weekend convention)
 - Graceful degradation when Supabase is unavailable or unconfigured
@@ -17,12 +19,13 @@ Based on [Calendar by Neatnik](https://neatnik.net/calendar), converted from PHP
 
 Open `index.html` in a browser. That's it -- the calendar works with no setup.
 
-To add event data, see [Supabase Setup](#supabase-setup) below.
+For local development with Supabase credentials:
 
 ```bash
-# Serve locally (optional, direct file open also works)
-python3 -m http.server 8000
-# Visit http://localhost:8000
+export SUPABASE_URL='https://your-project.supabase.co'
+export SUPABASE_ANON_KEY='your-anon-key'
+bash build.sh
+open index.html
 ```
 
 ## URL Parameters
@@ -44,63 +47,79 @@ The calendar optionally fetches events from a Supabase PostgreSQL database.
 
 ### 1. Create the table
 
-Run the schema in your Supabase SQL Editor (or use the seed script):
-
-```sql
-CREATE TABLE events (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  event_date DATE NOT NULL,
-  title TEXT NOT NULL,
-  description TEXT
-);
-
-CREATE INDEX idx_events_event_date ON events (event_date);
-```
-
-### 2. Enable Row Level Security
-
-```sql
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public read access"
-  ON events FOR SELECT
-  TO anon
-  USING (true);
-```
-
-### 3. Seed test data
-
-A seed script is provided to populate sample events for testing:
+Run `schema.sql` in your Supabase SQL Editor. It creates the `events`
+table, index, and RLS policy (idempotent, safe to run multiple times):
 
 ```bash
-# Set your Supabase credentials
+# Or copy-paste the contents of schema.sql into the Supabase SQL Editor
+cat schema.sql
+```
+
+### 2. Seed test data
+
+The seed script populates sample events for testing. It requires the
+**service_role** key (not the anon key) because RLS blocks anonymous
+inserts:
+
+```bash
+export SUPABASE_URL='https://your-project.supabase.co'
+export SUPABASE_ANON_KEY='your-service-role-key'
+bash seed.sh          # seeds current year
+bash seed.sh 2025     # seeds a specific year
+```
+
+Find both keys in your Supabase dashboard under Settings > API.
+
+The seed inserts 51 events: 14 single-event days, 4 multi-event days,
+and 1 stress-test day (Jun 15: 25 events) to verify tooltip scrolling.
+
+### 3. Configure credentials
+
+Credentials are injected at build time via `build.sh`, which replaces
+`%%SUPABASE_URL%%` and `%%SUPABASE_ANON_KEY%%` placeholder tokens in
+`index.html`. See [Deployment](#deployment) below.
+
+For local testing:
+
+```bash
 export SUPABASE_URL='https://your-project.supabase.co'
 export SUPABASE_ANON_KEY='your-anon-key'
-
-# Run the seed script (requires curl)
-bash seed.sh
+bash build.sh
 ```
 
-The seed script inserts events across the current year so you can
-verify event counts and tooltips in both layout modes.
+## Deployment
 
-### 4. Configure the calendar
+### Cloudflare Pages
 
-Edit `index.html` and fill in the constants near the top of the
-`<script>` block:
+1. Connect your repository in the Cloudflare Pages dashboard.
+2. Set the build configuration:
+   - **Build command**: `bash build.sh`
+   - **Build output directory**: `.`
+3. Add environment variables under Settings > Environment Variables:
+   - `SUPABASE_URL` -- your Supabase project URL
+   - `SUPABASE_ANON_KEY` -- your Supabase anon (public) key
 
-```javascript
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_ANON_KEY = 'your-anon-key';
-```
+### Any static host
+
+Run `build.sh` with the environment variables set, then deploy the
+resulting `index.html`.
 
 ## Printing
 
 1. Open the calendar in your browser.
 2. File > Print (Cmd+P / Ctrl+P).
-3. The info overlay and tooltips are automatically hidden.
+3. Navigation chevrons and tooltips are automatically hidden.
 4. Event count numbers remain visible.
 5. Best results in landscape orientation.
+
+## Project Files
+
+| File         | Purpose                                        |
+|--------------|------------------------------------------------|
+| `index.html` | The calendar (HTML + CSS + JS, single file)    |
+| `schema.sql` | Supabase table, index, and RLS policy          |
+| `seed.sh`    | Populates sample events for testing            |
+| `build.sh`   | Injects Supabase credentials at build time     |
 
 ## License
 
