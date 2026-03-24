@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS events (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   event_date DATE NOT NULL,
   title TEXT NOT NULL,
-  description TEXT
+  description TEXT,
+  category TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_event_date ON events (event_date);

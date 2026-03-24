@@ -37,6 +37,7 @@ SOFTWARE.
 <meta charset="utf-8">
 <title>Calendar</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="lib/poline.js"></script>
 <meta name="title" content="Calendar">
 <meta name="og:title" content="Calendar">
 <meta name="description" content="A simple printable calendar with the full year on a single page">
@@ -208,15 +209,15 @@ p {
 // Supabase configuration
 // ============================================================
 
-const SUPABASE_URL = '%%SUPABASE_URL%%';
-const SUPABASE_ANON_KEY = '%%SUPABASE_ANON_KEY%%';
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
 
 // ============================================================
 // Event fetching
 // ============================================================
 
 async function fetchEvents(year) {
-  // Returns { "YYYY-MM-DD": ["title1", "title2"], ... }
+  // Returns { "YYYY-MM-DD": [{title: "title1", category: "cat1"}], ... }
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return {};
 
   if (typeof window.supabase === 'undefined') {
@@ -230,7 +231,7 @@ async function fetchEvents(year) {
 
   const { data, error } = await supabase
     .from('events')
-    .select('event_date, title')
+    .select('event_date, title, category')
     .gte('event_date', startDate)
     .lte('event_date', endDate);
 
@@ -244,7 +245,7 @@ async function fetchEvents(year) {
     if (!eventsByDate[row.event_date]) {
       eventsByDate[row.event_date] = [];
     }
-    eventsByDate[row.event_date].push(row.title);
+    eventsByDate[row.event_date].push({ title: row.title, category: row.category });
   }
   return eventsByDate;
 }
@@ -352,14 +353,30 @@ async function renderCalendar(year, layout, sofshavua) {
   // Month headers
   const headerRow = document.getElementById('month-headers');
   headerRow.innerHTML = '';
+  const polineMonth = new poline.Poline({
+    anchorColors: [[0, 1, 0.5], [300, 1, 0.5]],
+    numPoints: 12
+  });
+  const monthColors = polineMonth.colorsCSS;
   for (let m = 1; m <= 12; m++) {
     const th = document.createElement('th');
     th.textContent = getMonthName(m);
+    th.style.color = monthColors[m - 1];
     headerRow.appendChild(th);
   }
 
   // Fetch events from Supabase
   const events = await fetchEvents(year);
+
+  // Generate category colors
+  const categories = [...new Set(Object.values(events).flat().map(e => e.category))].filter(Boolean);
+  const categoryPalette = new poline.Poline({
+    anchorColors: [[0, 1, 0.5], [300, 1, 0.5]],
+    numPoints: categories.length
+  });
+  const categoryColors = categoryPalette.colorsCSS;
+  const categoryColorMap = Object.fromEntries(categories.map((category, i) => [category, categoryColors[i]]));
+
 
   // Calendar body
   const tbody = document.getElementById('calendar-body');
@@ -417,9 +434,12 @@ async function renderCalendar(year, layout, sofshavua) {
           const tooltip = document.createElement('div');
           tooltip.className = 'tooltip';
           const ul = document.createElement('ul');
-          for (const title of dayEvents) {
+          for (const event of dayEvents) {
             const li = document.createElement('li');
-            li.textContent = title;
+            li.textContent = event.title;
+            if (event.category && categoryColorMap[event.category]) {
+              li.style.color = categoryColorMap[event.category];
+            }
             ul.appendChild(li);
           }
           tooltip.appendChild(ul);
